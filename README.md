@@ -1,118 +1,124 @@
-# محصول فاخر · Luxury Crop — Digital Menu + Admin Dashboard
+# محصول فاخر — المنيو ونظام التشغيل
 
-A premium, mobile-first, **Arabic-first (RTL)** digital QR menu for **Luxury Crop / محصول فاخر** (specialty coffee, Taif), plus a separate **admin dashboard** to manage it. Pure HTML/CSS/JS — **no backend, no build step**. Open the files and it runs.
+نسخة مخصصة لكافيه **محصول فاخر / Luxury Crop** مبنية بعد مراجعة نظام أريب، مع إعادة تنفيذ الأجزاء التي كانت تعتمد على المتصفح أو بيانات العرض.
 
-Built by **Mutawafiq / متوافق** — SFDA-compliant QR menus.
+## الروابط العامة — نسخة GitHub Pages
 
----
+- المنيو: https://a7madshiref001-ctrl.github.io/luxury-crop-system/
+- صفحة الإدارة: https://a7madshiref001-ctrl.github.io/luxury-crop-system/owner.html
+- المستودع الجديد: https://github.com/a7madshiref001-ctrl/luxury-crop-system
 
-## 1. What's in the box
+النسخة العامة **للتصفح** حسب اختيار GitHub فقط. صفحة الإدارة توضّح أن الدخول وتشغيل الطلبات يحتاجان السيرفر؛ إدارة المقهى الفعلية تعمل محليًا بروابط التشغيل التالية. لا توجد كلمة مرور إدارية منشورة، ولا بيانات طلبات أو عملاء في GitHub Pages.
 
-```
-luxury-crop-menu/
-├─ index.html         # the customer menu
-├─ admin.html         # the management dashboard
-├─ data/menu.json     # single source of truth (categories, items, prices, allergens, nutrition)
-├─ assets/logo.jpg    # the Luxury Crop logo
-├─ css/
-│   ├─ menu.css        # customer menu styles
-│   └─ admin.css       # dashboard styles
-├─ js/
-│   ├─ icons.js        # shared inline-SVG icon set (UI + 14 allergens)
-│   ├─ menu.js         # customer menu logic
-│   └─ admin.js        # dashboard logic
-├─ build-menu.js      # (dev) regenerates data/menu.json from the crawled catalog
-├─ server.js          # (dev) tiny static server for local preview
-└─ README.md
+النشر الآلي من `main` يبني حزمة ملفات الواجهة فقط بواسطة `scripts/export-pages.js`. لا ينشر كود السيرفر أو مجلد البيانات أو كلمات المرور. المستودع الجديد يبدأ بتاريخ نظيف ولا ينسخ تاريخ المفتاح القديم.
+
+## تشغيل سريع
+
+يتطلب Node.js 24 أو أحدث.
+
+```sh
+npm ci
+npm start
 ```
 
-The menu and the dashboard **both read the same `data/menu.json`**. There is one source of truth.
+- المنيو: http://127.0.0.1:5050/
+- الإدارة: http://127.0.0.1:5050/owner.html (وأيضًا admin.html للتوافق مع الرابط القديم)
+- أول تشغيل محلي ينشئ كلمة مرور عشوائية في `.runtime/owner-access.txt`. افتح الملف وانسخها إلى صفحة الدخول. الملف لا يُرفع إلى GitHub ولا يمكن طلبه من السيرفر.
+- البيانات الفعلية محفوظة في `.runtime/luxury-crop.sqlite`، وتبقى بعد إعادة التشغيل.
+- المعاينة المحلية تربط على `127.0.0.1` فقط. `HOST=0.0.0.0` يجعل السيرفر متاحًا داخل الشبكة عند ضبط الجدار الناري.
 
----
+## ما الذي تغير؟
 
-## 2. Running it locally
+### تجربة العميل
 
-The page uses `fetch()` to load `data/menu.json`, so it must be served over **HTTP** (not opened as a `file://` path, which browsers block).
+- اللوجو الأصلي و**٦٤ صنفًا في ١٠ أقسام** من المنيو الموجود، بنفس الأرقام والأسعار الأصلية.
+- ٦٤ صورة مستقلة مولّدة باستخدام أداة ImageGen المدمجة، مخففة إلى WebP داخل `assets/products/`؛ مجموعها نحو ٣٫٢ ميجابايت، مع التحميل التدريجي.
+- بحث عربي/إنجليزي يتحمل اختلاف الهمزات والتشكيل، أقسام، ترتيب بالسعر، مفضلة، ومظهر فاتح/داكن.
+- سلة محفوظة، كميات، ملاحظات، اختيارات الحليب والنكهة المسجلة للماتشا الكلاسيك فقط؛ لا إضافات مدفوعة مخترعة.
+- طلب للطاولة أو الاستلام؛ التوصيل اختياري من الإدارة مع رسوم وعنوان إلزامي.
+- رقم طلب ومتابعة حالة الطلب كل ١٥ ثانية. الدفع عند الاستلام. فتح واتساب لا يُسجَّل كمبيعة.
+- كوبون حقيقي بموعد انتهاء وحد أدنى، لا يجمع مع عرض نشط.
+- خيار Google متاح لكل درجات التقييم؛ لا توجيه انتقائي للمراجعات الإيجابية.
+- معلومات التغذية غير المعتمدة لا تظهر كأرقام مؤكدة. الحساسية غير المعتمدة واضحة كاحتمال، مع طلب مراجعة الفريق.
+- الصور موضحة للعميل باعتبارها صورًا مولدة توضيحية وليست تصويرًا فعليًا لمنتجات الفرع.
 
-```bash
-node server.js      # → http://localhost:5050  (menu)
-                    # → http://localhost:5050/admin.html  (dashboard)
+### تشغيل المقهى
+
+- دخول على السيرفر، جلسة HttpOnly تنتهي بعد ٨ ساعات، تحديد محاولات الدخول، ورفض الطلبات القادمة من مصدر مختلف.
+- طلبات مشتركة بين الأجهزة: جديد ← تحضير ← جاهز ← تسليم ودفع، مع إلغاء منفصل وحفظ ملخص الطلب.
+- تحديث قائمة التشغيل كل ١٠ ثوان؛ تحديث المنيو بين الأجهزة كل ١٥ ثانية. ليست مزامنة دفع لحظية.
+- إيراد ومقارنة أداء الأصناف وذروة الساعات وبيانات الزيارات من الاستخدام الفعلي، بلا مبيعات تجريبية.
+- إضافة/تعديل/حذف أصناف وأقسام، ترتيبها، توفرها، أسعارها ومعلوماتها، واستيراد/تصدير المنيو.
+- حفظ مركزي مع رقم إصدار يمنع جهازين من الكتابة فوق تعديلات بعضهما.
+- العملاء من الطلبات المكتملة، موافقة تسويقية اختيارية، وتصدير CSV مع معالجة حقن الصيغ.
+- ولاء من الطلبات المكتملة فقط، مع تسجيل تسليم المكافأة وخصم الأختام لمنع صرفها مرتين. تتحقق الإدارة من العميل عند الاستلام.
+- عروض بتاريخ بداية ونهاية، كوبونات، QR للطاولات يولد محليًا، ونسخ JSON وSQLite.
+
+## الإعدادات الافتراضية المهمة
+
+- عدد الطاولات **٣٠ كحد قابل للتعديل**؛ لم نجد عددًا موثقًا في المنيو القديم.
+- الطلب للطاولة والاستلام مفعّلان عند تشغيل السيرفر؛ التوصيل معطل.
+- العروض والكوبونات والولاء **معطلة افتراضيًا** حتى يحدد المقهى شروطه.
+- رقم واتساب المقهى فارغ. رقم الإدارة المصري الموجود في المصدر ليس دليلًا على أنه رقم استقبال المقهى، لذلك لم يُستخدم لإرسال طلبات العملاء.
+- لم نختلق مواعيد عمل أو وصفات أو ادعاء امتثال غذائي.
+
+## الاستضافة العامة
+
+**GitHub Pages يشغل واجهة التصفح فقط؛ نظام الطلبات والإدارة يحتاج تشغيل سيرفر Node مع قرص دائم.** إذا لم توجد API، تتحول الواجهة إلى التصفح، ولا تدعي إرسال طلب. لا توجد خدمة دفع إلكتروني أو نظام مخزون بالمكونات أو فاتورة ضريبية إلكترونية؛ الطباعة ملخص طلب.
+
+يتضمن المشروع Dockerfile. استخدم نسخة واحدة من التطبيق وقرصًا دائمًا مركبًا على `/data` خلف HTTPS reverse proxy:
+
+```sh
+docker build -t luxury-crop .
+docker run -d --name luxury-crop --restart unless-stopped \
+  -p 127.0.0.1:5050:5050 \
+  -v luxury-crop-data:/data \
+  -e ADMIN_PASSWORD -e PUBLIC_ORIGIN \
+  luxury-crop
 ```
 
-Any static server works (`npx serve`, VS Code Live Server, Python's `http.server`, etc.). For production, just upload the folder to any static host (GitHub Pages, Netlify, Cloudflare Pages…). No server code required.
+اضبط `ADMIN_PASSWORD` بكلمة قوية لا تقل عن ١٢ حرفًا و`PUBLIC_ORIGIN` على أصل الدومين مثل `https://menu.example.com` في بيئة السيرفر، ولا تضف الأسرار إلى المستودع. جلسات الإنتاج تتطلب HTTPS بسبب Secure cookie. لا تضع التطبيق على منصة بقرص مؤقت أو عدة نسخ مستقلة من قاعدة SQLite. الـDockerfile مجهز؛ بناء صورة Docker لم يُختبر في هذه الجلسة.
 
----
+متغيرات التشغيل: `HOST`، `PORT`، `DATA_DIR`، `ADMIN_PASSWORD`، `PUBLIC_ORIGIN`، `NODE_ENV`.
 
-## 3. Editing the menu (the dashboard)
+## النسخ الاحتياطي والاستعادة
 
-Open **`admin.html`**. It's clarity-first and works on phone or desktop.
+1. من الإعدادات، نزّل **قاعدة البيانات للاستعادة**. تُنشأ لقطة SQLite متسقة تشمل الطلبات، رموز المتابعة، مفاتيح منع التكرار، المنيو، الإعدادات، وصرف مكافآت الولاء.
+2. للاستعادة على جهاز/سيرفر آخر: أوقف التطبيق؛ استخدم مجلد بيانات جديدًا؛ ضع النسخة باسم `luxury-crop.sqlite` داخله؛ شغّل التطبيق مع `DATA_DIR` الذي يشير إليه.
+3. احتفظ بمجلد البيانات السابق حتى تتحقق من الاستعادة. لا تخلط ملف SQLite مستعادًا مع ملفات WAL قديمة.
+4. نسخة JSON مفيدة للفحص والتصدير. استيراد المنيو داخل اللوحة يستورد الأصناف والأقسام فقط، ولا يستبدل الطلبات. نقل قاعدة البيانات هو مسار الاستعادة الكامل.
 
-- **Categories** (right pane): select, add (`+ قسم`), edit (✏️), delete, and **drag ⋮⋮ to reorder**.
-- **Items** (middle pane): for the selected category — add (`+ صنف`), edit (✏️), delete (🗑️), quick **availability toggle** (✓/eye), and **drag ⋮⋮ to reorder**.
-- **Item editor** (slide-over): Arabic + English name & description, **price (SAR)**, estimated calories, estimated caffeine, optional image URL, the **14 allergens** (tap to toggle), **high-sodium** flag, and **availability** (off = hidden from the public menu).
-- **Live preview** (left pane, desktop): an embedded copy of the real menu that **refreshes after every edit**.
+لا تُنشر النسخ الاحتياطية؛ تحتوي بيانات عملاء. سجلات الزيارات تُحذف بعد ٩٠ يومًا. الطلبات تبقى إلى أن تطبق المنشأة سياسة الاحتفاظ المناسبة لها.
 
-### How data persists
-- Every change is **auto-saved to your browser's `localStorage`** (key `luxurycrop.menu`). Reopening the dashboard or the menu on the same browser keeps your edits.
-- `localStorage` is **per-browser/per-device**. To make edits permanent for everyone, click **حفظ دائم** (next section).
+## الخريطة التقنية
 
-### Export / Import (portable + permanent)
-- **`تصدير JSON`** downloads your current menu as `menu.json`.
-- **`استيراد`** loads a `menu.json` file back in (validated first — see security).
-- **`استعادة`** discards your local edits and restores the original `data/menu.json`.
-
-**To publish edits for real customers:** edit in the dashboard → click **حفظ دائم**. The dashboard triggers a GitHub Actions workflow (`.github/workflows/publish-menu.yml`, via `workflow_dispatch` on `api.github.com`), which writes and commits `data/menu.json` on the live GitHub Pages repo (`luxury-crop/luxury-crop.github.io`). The live menu no longer depends on any one browser's storage.
-
-This goes through GitHub Actions (instead of a Netlify function) because `*.netlify.app` is blocked on some local ISPs/networks, while `api.github.com` isn't. The actual file write happens inside the workflow run, authenticated by GitHub's own auto-issued token for that run — never exposed anywhere. The token hardcoded in `admin.js` (`GH_TOKEN`) only needs **"Actions: Read and write"** on this one repository to start the workflow; it has **no access to repository contents**, so even if it leaked, it could only trigger workflow runs, not directly read or write any file. Keep `admin.html`'s URL private regardless, and rotate the token if it's ever exposed.
-
-`تصدير JSON` is still available as a manual backup/export path.
-
----
-
-## 4. The data: `data/menu.json`
-
-- **9 categories, 50 items**, crawled from the café's old menu (`luxury-crop.easymenu.site`) — **names, descriptions and prices only**. The design is entirely ours.
-- Currency is **SAR**. Prices are integers exactly as on the source.
-- The old menu had **no English, no allergens, and no calories/caffeine** — so:
-  - **English** names & descriptions were authored for the AR/EN toggle.
-  - **Allergens** are **inferred from ingredients** and flagged `"allergens_confirmed": false` — *please review them in the dashboard before final publish.*
-  - **Calories & caffeine** are **estimates** (`"nutrition_estimated": true`), shown with an on-menu disclaimer; the café confirms the real figures.
-- Anything genuinely unknown is left as a clear `"TODO"` (e.g. the brand's `maps` / `tiktok` links are empty until provided — the menu hides them gracefully).
-
-Regenerate `data/menu.json` from the crawled catalog at any time with `node build-menu.js`.
-
----
-
-## 5. Features
-
-**Customer menu** — RTL Arabic ⇄ LTR English toggle · 5 top entry points (rating, allergens, info, location, contact) · scroll-synced category nav · search + filters (all / under 150 kcal / caffeine-free) · per-item SFDA badges (calories, caffeine, allergens, high-sodium) · 14-allergen reference · Instagram/TikTok/Maps · SFDA compliance strip · calm, silk-like motion (IntersectionObserver reveals, eased transitions, `prefers-reduced-motion` honored).
-
-**Dashboard** — full CRUD for categories & items · drag-to-reorder · allergen editor · availability toggle · live preview · localStorage + JSON export/import.
-
----
-
-## 6. Security notes (threat model & mitigations)
-
-The café (or an imported file) supplies the menu data, and the public menu renders it. The risks and how they're handled:
-
-| Threat | Mitigation |
+| الملف | وظيفته |
 |---|---|
-| **XSS via item names/descriptions** | Every café-supplied string is escaped (`esc()` → `& < > " '`) before it touches the DOM, in **both** the menu and the dashboard. No raw data is ever injected as markup. |
-| **Malicious / malformed `menu.json` import** | Imports pass through `normalizeMenu()`, which validates the shape (rejects if `categories` isn't an array), **coerces types**, **clamps string lengths**, **filters allergen keys** to the known 14, drops unknown fields, and only accepts `http(s)`/`assets/`-relative image & link URLs. File size is capped (3 MB). |
-| **Unsafe URLs (`javascript:` etc.)** | All links (social, maps, image) go through `safeUrl()` — only `https:`/`http:`/`mailto:`/`tel:` pass; anything else is dropped. |
-| **`localStorage` errors / quota** | All reads/writes are wrapped in `try/catch`; failures degrade gracefully to the bundled `data/menu.json`. |
-| **Code injection** | No `eval`, no `new Function`, no inline event handlers — all events are wired via `addEventListener` delegation. |
-| **CSP** | Both pages ship a **Content-Security-Policy** meta with a strict `script-src 'self'` (no inline/remote scripts), plus locked-down `img/font/connect/frame/object/base` directives. |
-| **Admin code leaking into the public menu** | `admin.js` is loaded **only** by `admin.html`. The public `index.html` contains no editing logic. `admin.html` is marked `noindex,nofollow`. |
-| **GitHub write token exposure** | `publishMenu()` calls `api.github.com` with a fine-grained PAT hardcoded in `admin.js` (by design, not hidden server-side — no backend exists), but that token's only permission is **"Actions: Read and write"** on this one repo: it can start the `publish-menu.yml` run, nothing more. It cannot read or write `data/menu.json` (or anything else) directly — that write happens inside the workflow, using GitHub's own per-run token. |
-| **Malicious workflow inputs** | The workflow itself re-validates `menu_b64` decodes to JSON with a `categories` array before writing anything, so a garbled or non-JSON trigger fails the run instead of corrupting `data/menu.json`. |
+| `index.html`, `css/menu.css`, `js/menu.js` | منيو العميل والسلة والمتابعة |
+| `owner.html`, `admin.html`, `css/admin.css`, `js/admin.js` | لوحة التشغيل |
+| `css/system.css`, `js/shared.js` | الخطوط والتصميم والمساعدات المشتركة |
+| `server.js` | HTTP/API، الجلسات، قاعدة البيانات والحفظ |
+| `lib/domain.js` | تحقق البيانات، التسعير، العروض، الكوبونات والإحصاءات |
+| `data/menu.json` | بيانات البداية؛ السيرفر يستوردها عند إنشاء قاعدة جديدة فقط |
+| `assets/products/*.webp` | صور الأصناف المولدة والمخففة |
+| `tests/` | اختبارات الوظائف والاستخدام |
+| `docs/AREEB-AUDIT.md` | تقرير مراجعة المصدر والتحويل |
+| `docs/image-prompts.json` | مجموعة البرومبتات النهائية وأداة التوليد |
 
-> Note: the dashboard's login gate is **client-side, static-hash auth**, and the Actions-trigger token in `admin.js` is visible to anyone who views the page source. Neither is a strong access control — the real protection is keeping `admin.html`'s URL private. If it's ever shared or indexed, rotate the GitHub token immediately (Settings → Developer settings → Personal access tokens) and pick a new admin password hash.
+بعد وجود قاعدة بيانات، عدّل المنيو من الإدارة، أو استورد JSON إلى الإدارة. تعديل ملف البداية وحده لا يكتب فوق بيانات المقهى الحالية. صور جديدة توضع داخل `assets/` ويُكتب مسارها في محرر الصنف. تمت إحالة `build-menu.js` القديم للتقاعد لأنه يولد قائمة أقدم وقد يحذف أصنافًا حالية.
 
----
+## التحقق
 
-## 7. Customization quick-reference
+```sh
+npm run check
+npm test
+npm run test:ui
+```
 
-- **Brand / colors:** `data/menu.json → brand` (logo, rating, location, socials, theme). The palette (white · near-black · red `#e1352b`) is pulled from the logo and lives as CSS variables at the top of `css/menu.css`.
-- **Fonts:** Cairo + Tajawal (Arabic), Poppins (Latin) via Google Fonts.
-- **Add Maps/TikTok:** fill `brand.maps` / `brand.tiktok` in `data/menu.json` (or via export after editing) and the links appear automatically.
+اختبارات الواجهة تستخدم Chrome المثبت محليًا، مع مقاسي 1440×1050 و390×844 وسيرفر اختبار منفصل. صور المراجعة في `docs/`. `npm test` يختبر API والتسعير والتزامن والولاء والنسخ وإعادة تشغيل السيرفر. CI يشغّل فحص الأصول والوظائف على Node 24.
+
+### ملاحظة إصلاح المفتاح القديم
+
+الكود القديم كان يحتوي مفتاح GitHub مشفرًا Base64 في المتصفح. أُزيل من هذه النسخة، وأُزيل مسار النشر القديم الذي كان يعتمد عليه. **نسخ Git القديمة وتاريخ المستودع قد يظلان يحتويانه؛ يجب إلغاء المفتاح القديم من حساب GitHub المالك له.** لم تُستعمل تلك القيمة أو تُنسخ إلى النظام الجديد.
+
+مرجع طبقة SQLite: [Node.js SQLite documentation](https://nodejs.org/api/sqlite.html).
