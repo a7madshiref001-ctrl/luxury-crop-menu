@@ -12,6 +12,7 @@ import {
   closeDialog,
   states,
   modes,
+  optionName,
 } from "./shared.js";
 let M,
   items = [],
@@ -23,6 +24,7 @@ let M,
   selection = null,
   stars = 0,
   sending = false;
+let refreshing = false;
 if (!["ar", "en"].includes(lang)) lang = "ar";
 if (!Array.isArray(favorites)) favorites = [];
 if (!Array.isArray(cart)) cart = [];
@@ -36,6 +38,13 @@ let last = store.get("lastOrder", null),
     note: "",
     marketingConsent: false,
   });
+if (
+  !last ||
+  typeof last.id !== "string" ||
+  typeof last.token !== "string" ||
+  !Array.isArray(last.lines)
+)
+  last = null;
 if (!checkout || typeof checkout !== "object" || Array.isArray(checkout))
   checkout = {
     mode: "table",
@@ -47,6 +56,9 @@ if (!checkout || typeof checkout !== "object" || Array.isArray(checkout))
     marketingConsent: false,
   };
 const tr = (ar, en) => (lang === "ar" ? ar : en);
+for (const key of ["name", "phone", "address", "note", "couponCode"]) {
+  if (typeof checkout[key] !== "string") checkout[key] = "";
+}
 const name = (i) => (lang === "ar" ? i.name_ar : i.name_en || i.name_ar);
 const desc = (i) => (lang === "ar" ? i.desc_ar : i.desc_en || i.desc_ar);
 const price = (c) => `${money(c, lang)} <small>${tr("ر.س", "SAR")}</small>`;
@@ -82,7 +94,7 @@ const total = () =>
   couponDiscount() +
   (checkout.mode === "delivery" ? Math.round(M.settings.deliveryFee * 100) : 0);
 const image = (i) =>
-  `<img src="${esc(i.image || "assets/products/170272.webp")}" alt="${esc(name(i))}" width="400" height="400" loading="lazy" decoding="async">`;
+  `<img src="${esc(i.image || "assets/logo.png")}" alt="${esc(name(i))}" width="400" height="400" loading="lazy" decoding="async">`;
 const track = (kind, itemId = "") => {
   if (M.server) post("api/events", { kind, itemId }).catch(() => {});
 };
@@ -107,6 +119,15 @@ async function load() {
     };
   }
   index();
+  const pending = store.get("pending", null);
+  if (
+    pending &&
+    Array.isArray(pending.lines) &&
+    typeof pending.idempotencyKey === "string"
+  ) {
+    checkout = { ...checkout, ...pending };
+    cart = pending.lines;
+  } else if (pending) store.set("pending", null);
   cart = cart.filter(
     (l) =>
       l &&
@@ -118,7 +139,7 @@ async function load() {
   if (!M.settings.modes.includes(checkout.mode))
     checkout.mode = M.settings.modes[0];
   const scannedTable = new URLSearchParams(location.search).get("table");
-  if (scannedTable && M.settings.modes.includes("table")) {
+  if (!pending && scannedTable && M.settings.modes.includes("table")) {
     checkout.mode = "table";
     checkout.table =
       /^\d+$/.test(scannedTable) &&
@@ -133,8 +154,11 @@ async function load() {
   saveCart();
   track("visit");
   if (last) $("#track").hidden = false;
+  previousOfferState = !!activeOffer();
 }
 function renderShell() {
+  if (!M) return;
+  const savedSort = $("#sort").value || "menu";
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   $("#lang").textContent = lang === "ar" ? "EN" : "عربي";
@@ -182,6 +206,7 @@ function renderShell() {
   ]
     .map(([v, a, e]) => `<option value="${v}">${tr(a, e)}</option>`)
     .join("");
+  $("#sort").value = savedSort;
   $("#endTitle").innerHTML = tr(
     "المذاق يحلّي يومك.<br>ورأيك يحلّي تجربتنا.",
     "Good taste makes your day.<br>Your feedback makes ours.",
@@ -227,6 +252,7 @@ function renderCategories() {
       .join("");
 }
 function renderProducts() {
+  if (!M) return;
   const q = normalize($("#search").value),
     sort = $("#sort").value;
   let found = items.filter(
@@ -305,8 +331,17 @@ function details(id) {
   );
 }
 function add(id, detail = {}, suggested = false) {
+  if (store.get("pending", null)) {
+    toast(
+      tr(
+        "راجع نتيجة طلبك السابق من السلة أولًا",
+        "Resolve your previous order in the bag first",
+      ),
+    );
+    return false;
+  }
   const i = getItem(id);
-  if (!i?.available || !M.settings.acceptingOrders) return;
+  if (!i?.available || !M.settings.acceptingOrders) return false;
   const quantity = detail.quantity || 1;
   if (
     cart.filter((l) => l.id === id).reduce((n, l) => n + l.quantity, 0) +
@@ -314,7 +349,7 @@ function add(id, detail = {}, suggested = false) {
     20
   ) {
     toast(tr("الحد الأقصى ٢٠ من الصنف", "Maximum 20 of each item"));
-    return;
+    return false;
   }
   const line = {
     id,
@@ -338,8 +373,10 @@ function add(id, detail = {}, suggested = false) {
   track("add_cart", id);
   if (suggested) track("suggestion", id);
   toast(tr("أضفناه لطلبك", "Added to your order"));
+  return true;
 }
 function saveCart(changed = false) {
+  if (!M) return;
   store.set("cart", cart);
   if (changed) store.set("pending", null);
   $("#cartDock").hidden = !cart.length;
@@ -347,6 +384,7 @@ function saveCart(changed = false) {
   $("#cartTotal").innerHTML = price(total());
 }
 function cartDialog() {
+  if (!M) return;
   const unavailable = cart.some((l) => !getItem(l.id)?.available);
   dialog(
     `<h2>${tr("طلبك، على ذوقك.", "Your order, your way.")}</h2><p class="muted">${tr("راجع اختياراتك قبل الإرسال", "Review your choices before sending")}</p>${
@@ -354,16 +392,36 @@ function cartDialog() {
         ? cart
             .map((l, k) => {
               const i = getItem(l.id);
-              return `<div class="cart-line">${image(i)}<div><h3>${esc(name(i))}</h3><p>${esc(name(i.category))} ${!i.available ? tr("· غير متوفر، احذفه للمتابعة", "· Unavailable, remove to continue") : ""}</p>${l.note ? `<p>${esc(l.note)}</p>` : ""}${l.extra || l.milk ? `<p>${esc(l.milk)} ${esc(l.extra)}</p>` : ""}<div class="quantity"><button data-line="${k}" data-delta="-1" aria-label="تقليل">−</button><strong>${l.quantity}</strong><button data-line="${k}" data-delta="1" aria-label="زيادة">+</button></div></div><div><span class="price">${price(linePrice(l) * l.quantity)}</span><button class="icon-btn" data-remove="${k}" aria-label="حذف">${icon("close")}</button></div></div>`;
+              return `<div class="cart-line">${image(i)}<div><h3>${esc(name(i))}</h3><p>${esc(name(i.category))} ${!i.available ? tr("· غير متوفر، احذفه للمتابعة", "· Unavailable, remove to continue") : ""}</p>${l.note ? `<p>${esc(l.note)}</p>` : ""}${l.extra || l.milk ? `<p>${esc(optionName(l.milk, lang))} ${esc(optionName(l.extra, lang))}</p>` : ""}<div class="quantity"><button data-line="${k}" data-delta="-1" aria-label="تقليل">−</button><strong>${l.quantity}</strong><button data-line="${k}" data-delta="1" aria-label="زيادة">+</button></div></div><div><span class="price">${price(linePrice(l) * l.quantity)}</span><button class="icon-btn" data-remove="${k}" aria-label="حذف">${icon("close")}</button></div></div>`;
             })
             .join("")
         : `<div class="empty">${tr("سلتك فاضية… اختَر شيء تحبه.", "Your bag is empty. Find something you love.")}</div>`
-    }${cart.length ? `<form id="checkout"><label class="field">${tr("طريقة الاستلام", "Order type")}<select id="orderMode" name="mode" class="input">${M.settings.modes.map((m) => `<option value="${m}" ${checkout.mode === m ? "selected" : ""}>${tr(modes[m], { table: "At your table", takeaway: "Pickup", delivery: "Delivery" }[m])}</option>`).join("")}</select></label><div class="split"><label class="field" ${checkout.mode !== "table" ? "hidden" : ""}>${tr("رقم الطاولة", "Table number")}<input class="input" name="table" type="number" min="1" max="${M.settings.tables}" step="1" value="${esc(checkout.table)}" ${checkout.mode === "table" ? "required" : ""}></label><label class="field">${tr("الاسم", "Name")}<input class="input" name="name" autocomplete="given-name" maxlength="80" value="${esc(checkout.name)}" ${checkout.mode !== "table" ? "required" : ""}></label><label class="field">${tr(checkout.mode === "table" ? "الجوال (اختياري)" : "الجوال", "Mobile" + (checkout.mode === "table" ? " (optional)" : ""))}<input class="input" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="05xxxxxxxx" value="${esc(checkout.phone)}" ${checkout.mode !== "table" ? "required" : ""}></label></div>${checkout.mode === "delivery" ? `<label class="field">${tr("عنوان التوصيل", "Delivery address")}<textarea name="address" class="input" required minlength="8" maxlength="300">${esc(checkout.address)}</textarea></label>` : ""}<label class="field">${tr("ملاحظة على الطلب", "Order note")}<textarea name="note" class="input" maxlength="500">${esc(checkout.note)}</textarea></label><label class="check"><input type="checkbox" name="marketingConsent" ${checkout.marketingConsent ? "checked" : ""}>${tr("أوافق على استقبال عروض المقهى على جوالي (اختياري)", "I agree to receive cafe offers on my phone (optional)")}</label><p class="muted" style="font-size:11px">${tr("نستخدم بياناتك لتنفيذ الطلب. الدفع عند الاستلام.", "We use your details to fulfill your order. Pay on collection.")}</p>${checkout.mode === "delivery" ? `<div class="total-row"><span>${tr("رسوم التوصيل", "Delivery fee")}</span><span>${price(M.settings.deliveryFee * 100)}</span></div>` : ""}<label class="field">${tr("كود خصم (اختياري)", "Discount code (optional)")}<div class="row"><input class="input" name="couponCode" maxlength="24" value="${esc(checkout.couponCode || "")}" dir="ltr"><button class="btn secondary" id="applyCoupon" type="button">${tr("تطبيق", "Apply")}</button></div></label>${couponDiscount() ? `<div class="total-row"><span>${tr("خصم الكوبون", "Coupon discount")}</span><span>− ${price(couponDiscount())}</span></div>` : ""}<div class="total-row grand"><span>${tr("الإجمالي", "Total")}</span><span>${price(total())}</span></div><div class="dialog-footer"><button class="btn red full" type="submit" ${unavailable || !M.settings.acceptingOrders || !M.server ? "disabled" : ""}>${tr("إرسال الطلب للمقهى", "Send order to cafe")} ${icon("arrow")}</button></div></form>` : ""}`,
+    }${cart.length ? `<form id="checkout"><label class="field">${tr("طريقة الاستلام", "Order type")}<select id="orderMode" name="mode" class="input">${M.settings.modes.map((m) => `<option value="${m}" ${checkout.mode === m ? "selected" : ""}>${tr(modes[m], { table: "At your table", takeaway: "Pickup", delivery: "Delivery" }[m])}</option>`).join("")}</select></label><div class="split"><label class="field" ${checkout.mode !== "table" ? "hidden" : ""}>${tr("رقم الطاولة", "Table number")}<input class="input" name="table" type="number" min="1" max="${M.settings.tables}" step="1" value="${esc(checkout.table)}" ${checkout.mode === "table" ? "required" : "disabled"}></label><label class="field">${tr("الاسم", "Name")}<input class="input" name="name" autocomplete="given-name" maxlength="80" value="${esc(checkout.name)}" ${checkout.mode !== "table" ? "required" : ""}></label><label class="field">${tr(checkout.mode === "table" ? "الجوال (اختياري)" : "الجوال", "Mobile" + (checkout.mode === "table" ? " (optional)" : ""))}<input class="input" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="05xxxxxxxx" value="${esc(checkout.phone)}" ${checkout.mode !== "table" ? "required" : ""}></label></div>${checkout.mode === "delivery" ? `<label class="field">${tr("عنوان التوصيل", "Delivery address")}<textarea name="address" class="input" required minlength="8" maxlength="300">${esc(checkout.address)}</textarea></label>` : ""}<label class="field">${tr("ملاحظة على الطلب", "Order note")}<textarea name="note" class="input" maxlength="500">${esc(checkout.note)}</textarea></label><label class="check"><input type="checkbox" name="marketingConsent" ${checkout.marketingConsent ? "checked" : ""}>${tr("أوافق على استقبال عروض المقهى على جوالي (اختياري)", "I agree to receive cafe offers on my phone (optional)")}</label><p class="muted" style="font-size:11px">${tr("نستخدم بياناتك لتنفيذ الطلب. الدفع عند الاستلام.", "We use your details to fulfill your order. Pay on collection.")}</p>${checkout.mode === "delivery" ? `<div class="total-row"><span>${tr("رسوم التوصيل", "Delivery fee")}</span><span>${price(M.settings.deliveryFee * 100)}</span></div>` : ""}<label class="field">${tr("كود خصم (اختياري)", "Discount code (optional)")}<div class="row"><input class="input" name="couponCode" maxlength="24" value="${esc(checkout.couponCode || "")}" dir="ltr"><button class="btn secondary" id="applyCoupon" type="button">${tr("تطبيق", "Apply")}</button></div></label>${couponDiscount() ? `<div class="total-row"><span>${tr("خصم الكوبون", "Coupon discount")}</span><span>− ${price(couponDiscount())}</span></div>` : ""}<div class="total-row grand"><span>${tr("الإجمالي", "Total")}</span><span>${price(total())}</span></div><div class="dialog-footer"><button class="btn red full" type="submit" ${unavailable || !M.settings.acceptingOrders || !M.server ? "disabled" : ""}>${tr("إرسال الطلب للمقهى", "Send order to cafe")} ${icon("arrow")}</button></div></form>` : ""}`,
   );
+  const pending = store.get("pending", null);
+  if (pending && $("#checkout")) {
+    const notice = document.createElement("p");
+    notice.className = "notice";
+    notice.textContent = tr(
+      "لم نتأكد من نتيجة الإرسال السابق. اضغط إعادة التحقق بنفس الطلب لتجنب تكراره قبل تعديل السلة.",
+      "The previous submission is unconfirmed. Retry the same order before editing to avoid duplicates.",
+    );
+    $("#checkout").prepend(notice);
+    $("#dialog")
+      .querySelectorAll(
+        "input, select, textarea, [data-line], [data-remove], #applyCoupon",
+      )
+      .forEach((el) => (el.disabled = true));
+    $("#checkout [type=submit]").textContent = tr(
+      "إعادة التحقق من الطلب",
+      "Retry this order safely",
+    );
+  }
 }
 function readCheckout() {
   const f = $("#checkout");
   if (!f) return;
+  if (store.get("pending", null)) return;
   const data = Object.fromEntries(new FormData(f));
   checkout = {
     ...checkout,
@@ -391,6 +449,9 @@ async function submitOrder(e) {
     };
     store.set("pending", pending);
   }
+  $("#dialog")
+    .querySelectorAll("button, input, select, textarea")
+    .forEach((el) => (el.disabled = true));
   try {
     last = await post("api/orders", pending);
     store.set("lastOrder", last);
@@ -400,9 +461,11 @@ async function submitOrder(e) {
     $("#track").hidden = false;
     showOrder();
   } catch (err) {
+    if (err.status && err.status < 500 && err.status !== 429)
+      store.set("pending", null);
     if (err.status === 409) {
       store.set("pending", null);
-      await refreshMenu();
+      await refreshMenu(true);
     }
     toast(
       err.message ||
@@ -418,33 +481,66 @@ async function submitOrder(e) {
 }
 async function showOrder() {
   if (!last) return;
+  renderOrder();
+  const view = $("#dialog .tracking");
   try {
     const fresh = await api(
       `api/order/${last.id}?token=${encodeURIComponent(last.token)}`,
     );
     last = { ...last, ...fresh };
     store.set("lastOrder", last);
-  } catch {}
+    if ($("#dialog").open && $("#dialog .tracking") === view) renderOrder();
+  } catch {
+    if ($("#dialog").open && $("#dialog .tracking") === view) {
+      const notice = document.createElement("p");
+      notice.className = "notice";
+      notice.textContent = tr(
+        "تعذر تحديث الحالة؛ المعروض آخر حالة محفوظة.",
+        "Could not refresh. Showing the last saved status.",
+      );
+      view.prepend(notice);
+    }
+  }
+}
+function renderOrder() {
   const seq = ["new", "preparing", "ready", "completed"];
   dialog(
     `<div class="tracking"><span class="eyebrow">YOUR LITTLE MOMENT</span><h2>${tr("طلبك عندنا", "We have your order")}</h2><div class="order-number">#${String(last.number).padStart(3, "0")}</div><span class="badge ${last.status === "cancelled" ? "red" : "green"}">${tr(states[last.status], { new: "Received", preparing: "Preparing", ready: "Ready", completed: "Completed", cancelled: "Cancelled" }[last.status])}</span><div class="steps">${seq.map((s, i) => `<div class="step ${seq.indexOf(last.status) >= i ? "done" : ""}">${tr(states[s], { new: "Received", preparing: "Preparing", ready: "Ready", completed: "Completed" }[s])}</div>`).join("")}</div><p class="muted">${tr("الدفع عند الاستلام. تابع حالة طلبك من هنا.", "Pay on collection. Track your order here.")}</p><hr class="divider">${last.lines.map((l) => `<div class="total-row"><span>${l.quantity} × ${esc(lang === "ar" ? l.name : l.name_en || l.name)}</span><span>${price(l.quantity * l.unit)}</span></div>`).join("")}${last.discount ? `<div class="total-row"><span>${tr("خصم الكوبون", "Coupon discount")}</span><span>− ${price(last.discount)}</span></div>` : ""}${last.fee ? `<div class="total-row"><span>${tr("رسوم التوصيل", "Delivery fee")}</span><span>${price(last.fee)}</span></div>` : ""}<div class="total-row grand"><span>${tr("الإجمالي", "Total")}</span><span>${price(last.total)}</span></div><button class="btn secondary full" id="refreshOrder">${tr("تحديث حالة الطلب", "Refresh status")}</button>${M.settings.whatsapp ? `<a class="btn outline full" style="margin-top:10px" href="https://wa.me/${M.settings.whatsapp}?text=${encodeURIComponent("استفسار عن طلب محصول فاخر رقم " + last.number)}" target="_blank" rel="noopener">${tr("استفسار على واتساب", "Ask on WhatsApp")}</a>` : ""}</div>`,
   );
 }
 function review() {
+  if (!M) {
+    toast(tr("جارٍ تحميل المنيو…", "Loading the menu…"));
+    return;
+  }
   stars = 0;
   dialog(
     `<h2>${tr("كيف كانت تجربتك؟", "How was your visit?")}</h2><p class="muted">${tr("كل رأي يهمنا، ويساعدنا نقدم الأفضل.", "Every experience matters. Help us make it better.")}</p><div class="stars">${[1, 2, 3, 4, 5].map((n) => `<button data-star="${n}" aria-label="${n} نجوم" aria-pressed="false">${icon("star")}</button>`).join("")}</div><label class="field">${tr("احكِ لنا", "Tell us more")}<textarea class="input" id="reviewNote" maxlength="1000"></textarea></label><button class="btn full red" id="sendReview" ${M.server ? "" : "disabled"}>${tr("أرسل رأيك للإدارة", "Send feedback")}</button><a class="btn outline full" style="margin-top:12px" href="${esc(M.brand.maps)}" target="_blank" rel="noopener">${tr("تقييمنا على Google", "Review us on Google")} ↗</a>`,
   );
 }
-async function refreshMenu() {
-  if (!M.server) return;
+async function refreshMenu(force = false) {
+  if (refreshing || (sending && !force)) return;
+  refreshing = true;
   try {
     const updated = await api("api/menu");
-    if (updated.revision !== M.revision) {
+    if (!M.server || updated.revision !== M.revision) {
       const savedSort = $("#sort").value;
       if ($("#checkout")) readCheckout();
       M = updated;
       index();
+      if (selection && $("#itemQty")) {
+        const selected = getItem(selection.id);
+        if (!selected || !selected.available || !M.settings.acceptingOrders) {
+          closeDialog();
+          selection = null;
+          toast(
+            tr(
+              "تغير توفر الصنف؛ راجع المنيو.",
+              "Availability changed; please check the menu.",
+            ),
+          );
+        }
+      }
       if (!M.settings.modes.includes(checkout.mode))
         checkout.mode = M.settings.modes[0];
       if (category !== "all" && !M.categories.some((c) => c.id === category))
@@ -462,11 +558,24 @@ async function refreshMenu() {
       $("#sort").value = savedSort;
       renderProducts();
       saveCart();
+      if (selection && $("#itemTotal")) {
+        const current = getItem(selection.id);
+        if (current) {
+          $("#itemTotal").innerHTML = price(
+            (unit(current) + ($("#itemExtra")?.value ? 400 : 0)) *
+              selection.quantity,
+          );
+          $("#dialog .row.between .price").innerHTML = price(unit(current));
+        }
+      }
       if ($("#checkout")) {
         cartDialog();
       }
     }
-  } catch {}
+  } catch {
+  } finally {
+    refreshing = false;
+  }
 }
 $("#lang").addEventListener("click", () => {
   lang = lang === "ar" ? "en" : "ar";
@@ -523,6 +632,7 @@ document.addEventListener("click", async (e) => {
     renderProducts();
   }
   if (d.qty) {
+    if (!selection || !getItem(selection.id)) return;
     selection.quantity = Math.min(
       20,
       Math.max(1, selection.quantity + Number(d.qty)),
@@ -537,8 +647,7 @@ document.addEventListener("click", async (e) => {
     selection.note = $("#itemNote").value;
     selection.extra = $("#itemExtra")?.value || "";
     selection.milk = $("#itemMilk")?.value || "";
-    add(selection.id, selection);
-    closeDialog();
+    if (add(selection.id, selection)) closeDialog();
   }
   if (d.suggest) {
     add(d.suggest, {}, true);
@@ -548,7 +657,15 @@ document.addEventListener("click", async (e) => {
     readCheckout();
     const l = cart[Number(d.line)],
       next = l.quantity + Number(d.delta);
-    if (next > 20) return;
+    if (
+      Number(d.delta) > 0 &&
+      cart
+        .filter((row) => row.id === l.id)
+        .reduce((n, row) => n + row.quantity, 0) >= 20
+    ) {
+      toast(tr("الحد الأقصى ٢٠ من الصنف", "Maximum 20 of each item"));
+      return;
+    }
     l.quantity = next;
     if (next === 0) cart.splice(Number(d.line), 1);
     saveCart(true);
@@ -622,6 +739,7 @@ document.addEventListener("submit", (e) => {
   if (e.target.id === "checkout") submitOrder(e);
 });
 let previousOfferState = false;
+let previousCheckoutTotal = null;
 setInterval(() => {
   if (M && !document.hidden) {
     refreshMenu();
@@ -637,8 +755,19 @@ setInterval(() => {
       }
     }
     saveCart();
+    if ($("#checkout") && !sending && total() !== previousCheckoutTotal) {
+      readCheckout();
+      previousCheckoutTotal = total();
+      cartDialog();
+    }
   }
 }, 15000);
+window.addEventListener("online", () => {
+  if (M) refreshMenu();
+});
+document.addEventListener("visibilitychange", () => {
+  if (M && !document.hidden) refreshMenu();
+});
 load().catch(() => {
   $("#products").innerHTML =
     '<div class="empty">تعذر تحميل المنيو. حدّث الصفحة للمحاولة مجددًا.</div>';

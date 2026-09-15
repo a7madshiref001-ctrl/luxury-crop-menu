@@ -455,3 +455,79 @@ test("loyalty redemption, database backup and durable restart", async () => {
   });
   assert.equal(bad.status, 400);
 });
+
+test("coupon penny allocation never makes a free line negative", () => {
+  const m = structuredClone(menu);
+  const rows = m.categories.flatMap((c) => c.items).slice(0, 3);
+  rows[0].price = 0.01;
+  rows[1].price = 0.01;
+  rows[2].price = 0;
+  const s = settings();
+  s.coupon = {
+    enabled: true,
+    code: "PENNY",
+    percent: 50,
+    minSubtotal: 0,
+    endsAt: new Date(Date.now() + 60000).toISOString(),
+  };
+  const q = D.quoteOrder(
+    {
+      ...base(),
+      couponCode: "PENNY",
+      lines: rows.map((i) => ({ id: i.id, quantity: 1 })),
+    },
+    m,
+    s,
+  );
+  assert.equal(q.discount, 1);
+  assert.equal(
+    q.lines.reduce((n, l) => n + l.discount, 0),
+    1,
+  );
+  assert(q.lines.every((l) => l.discount <= l.total && l.discount >= 0));
+  assert.equal(q.lines[2].discount, 0);
+});
+
+test("invalid saved dates are rejected even when a promotion is disabled", () => {
+  const s = settings();
+  s.offer.startsAt = "not-a-date";
+  assert.throws(() => D.validateSettings(s));
+});
+
+test("chunked Arabic JSON remains intact across UTF-8 byte boundaries", async () => {
+  const http = require("node:http");
+  const payload = Buffer.from(
+    JSON.stringify({ ...base(), name: "عميل عربي", note: "ملاحظة بدون سكر" }),
+  );
+  const result = await new Promise((resolve, reject) => {
+    const request = http.request(
+      origin + "/api/orders",
+      { method: "POST", headers: { "Content-Type": "application/json" } },
+      (response) => {
+        let value = "";
+        response.on("data", (c) => (value += c));
+        response.on("end", () =>
+          resolve({ status: response.statusCode, value: JSON.parse(value) }),
+        );
+      },
+    );
+    request.on("error", reject);
+    let offset = 0;
+    const write = () => {
+      if (offset < payload.length) {
+        request.write(payload.subarray(offset, ++offset));
+        setImmediate(write);
+      } else request.end();
+    };
+    write();
+  });
+  assert.equal(result.status, 201);
+  const login = await req("/api/login", {
+    password: "test-password-not-production",
+  });
+  cookie = login.r.headers.get("set-cookie").split(";")[0];
+  const state = (await req("/api/admin/state", null, null, true)).j;
+  const order = state.orders.find((o) => o.id === result.value.id);
+  assert.equal(order.name, "عميل عربي");
+  assert.equal(order.note, "ملاحظة بدون سكر");
+});

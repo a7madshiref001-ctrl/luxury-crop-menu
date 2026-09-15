@@ -15,7 +15,7 @@ module.exports = defineConfig({
     reuseExistingServer: false,
     env: {
       PORT: "5152",
-      DATA_DIR: ".runtime/ui-tests",
+      DATA_DIR: `.runtime/ui-tests-${Date.now()}`,
       ADMIN_PASSWORD: "ui-test-password-local-only",
       NODE_ENV: "test",
     },

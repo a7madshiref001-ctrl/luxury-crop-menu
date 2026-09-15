@@ -40,7 +40,11 @@ export async function api(url, options = {}) {
     headers: { "Content-Type": "application/json", ...options.headers },
     signal: options.signal || AbortSignal.timeout(12000),
   });
-  const j = await r.json().catch(() => ({ error: "تعذر الاتصال بالسيرفر" }));
+  const j = await r.json().catch(() => {
+    throw Object.assign(new Error("خدمة النظام غير متاحة حاليًا"), {
+      status: r.ok ? 502 : r.status,
+    });
+  });
   if (!r.ok) throw Object.assign(new Error(j.error), { status: r.status });
   return j;
 }
@@ -76,6 +80,7 @@ export function dialog(content) {
   const el = $("#dialog");
   el.innerHTML = `<button class="icon-btn close" data-close aria-label="إغلاق / Close">${icon("close")}</button>${content}`;
   if (!el.open) el.showModal();
+  el.scrollTop = 0;
   document.body.classList.add("modal-open");
 }
 export function closeDialog() {
@@ -121,3 +126,25 @@ export const modes = {
   takeaway: "استلام من الفرع",
   delivery: "توصيل",
 };
+export const optionName = (value, lang = "ar") => {
+  const options = {
+    cow: ["حليب بقري", "Dairy milk"],
+    soy: ["حليب صويا", "Soy milk"],
+    coconut: ["حليب جوز الهند", "Coconut milk"],
+    almond: ["حليب لوز", "Almond milk"],
+    vanilla: ["فانيليا", "Vanilla"],
+    caramel: ["كراميل", "Caramel"],
+  };
+  return options[value]?.[lang === "en" ? 1 : 0] || "";
+};
+document.addEventListener(
+  "error",
+  (e) => {
+    if (e.target instanceof HTMLImageElement && !e.target.dataset.fallback) {
+      e.target.dataset.fallback = "true";
+      e.target.src = "assets/logo.png";
+      e.target.style.objectFit = "contain";
+    }
+  },
+  true,
+);

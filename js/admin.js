@@ -12,6 +12,7 @@ import {
   money,
   states,
   modes,
+  optionName,
 } from "./shared.js";
 let S,
   page = "home",
@@ -19,6 +20,16 @@ let S,
   query = "",
   busy = false,
   editing = null;
+let dirty = false,
+  sessionEpoch = 0,
+  refreshing = false,
+  refreshVersion = 0;
+const discardChanges = () =>
+  !dirty || confirm("عندك تعديلات لم تُحفظ. تركها والمتابعة؟");
+const saveError = (err) =>
+  err.status === 409
+    ? "تغيرت البيانات من جهاز آخر. انسخ تعديلاتك ثم اضغط تحديث وأعد المحاولة."
+    : err.message || "تعذر تنفيذ العملية";
 const title = {
   home: "نظرة عامة",
   orders: "الطلبات",
@@ -41,9 +52,17 @@ const items = () =>
 const empty = (t) =>
   `<div class="empty">${icon("coffee")}<p>${esc(t)}</p></div>`;
 async function refresh(render = true) {
+  refreshing = true;
+  const epoch = sessionEpoch;
+  const version = ++refreshVersion;
   try {
     const next = await api(`api/admin/state?days=${$("#period").value}`);
+    if (epoch !== sessionEpoch || version !== refreshVersion) return;
     S = next;
+    $("#loginUnavailable")?.remove();
+    $("#loginForm")
+      .querySelectorAll("input,button,label")
+      .forEach((el) => (el.hidden = false));
     $("#loginScreen").hidden = true;
     $("#dashboard").hidden = false;
     $("#syncStatus").innerHTML = '<i class="alert-dot"></i> متصل';
@@ -51,16 +70,37 @@ async function refresh(render = true) {
       S.orders.filter((o) => o.status === "new").length || "";
     if (render) draw();
   } catch (e) {
+    if (epoch !== sessionEpoch || version !== refreshVersion) return;
     if (e.status === 401) {
+      closeDialog();
+      S = null;
       $("#loginScreen").hidden = false;
       $("#dashboard").hidden = true;
     } else {
+      if (!S) {
+        $("#loginForm")
+          .querySelectorAll("input,button,label")
+          .forEach((el) => (el.hidden = true));
+        if (!$("#loginUnavailable")) {
+          const note = document.createElement("div");
+          note.id = "loginUnavailable";
+          note.className = "notice";
+          note.textContent =
+            "هذه النسخة تعرض المنيو على GitHub Pages. لوحة الإدارة والطلبات تحتاج تشغيل السيرفر؛ لا يوجد تسجيل دخول للإدارة على الاستضافة الحالية. افتح نسخة الإدارة المحلية بعد تشغيل النظام على جهازك.";
+          $("#loginError").before(note);
+        }
+      }
       $("#syncStatus").textContent = "انقطع الاتصال";
       toast(e.message || "تعذر الاتصال");
     }
+  } finally {
+    if (version === refreshVersion) refreshing = false;
   }
 }
 function go(p) {
+  $("#sidebar").classList.remove("open");
+  if (!discardChanges()) return;
+  dirty = false;
   page = p;
   query = "";
   $("#sidebar").classList.remove("open");
@@ -158,7 +198,7 @@ function orderCard(o) {
       preparing: "الطلب جاهز",
       ready: "تم التسليم والدفع",
     };
-  return `<article class="order-card"><div class="row between"><h3>#${String(o.number).padStart(3, "0")}</h3><span class="badge">${esc(modes[o.mode])}${o.table ? " · " + o.table : ""}</span></div><small class="muted">${date(o.createdAt)}${o.name ? " · " + esc(o.name) : ""}</small><div class="order-lines">${o.lines.map((l) => `<p><b>${l.quantity} × ${esc(l.name)}</b><br><small>${esc(l.categoryName)}${l.note ? " · " + esc(l.note) : ""}${l.extra ? " · " + esc(l.extra) : ""}${l.milk ? " · " + esc(l.milk) : ""}</small></p>`).join("")}</div>${o.note ? `<div class="notice">${esc(o.note)}</div>` : ""}<div class="row between"><strong>${cash(o.total)}</strong><button class="btn small outline" data-receipt="${o.id}">التفاصيل</button></div>${next ? `<div class="order-actions"><button class="btn red" data-status="${next}" data-order="${o.id}">${labels[o.status]}</button><button class="btn outline" data-status="cancelled" data-order="${o.id}">إلغاء</button></div>` : ""}</article>`;
+  return `<article class="order-card"><div class="row between"><h3>#${String(o.number).padStart(3, "0")}</h3><span class="badge">${esc(modes[o.mode])}${o.table ? " · " + o.table : ""}</span></div><small class="muted">${date(o.createdAt)}${o.name ? " · " + esc(o.name) : ""}</small><div class="order-lines">${o.lines.map((l) => `<p><b>${l.quantity} × ${esc(l.name)}</b><br><small>${esc(l.categoryName)}${l.note ? " · " + esc(l.note) : ""}${l.extra ? " · " + esc(optionName(l.extra)) : ""}${l.milk ? " · " + esc(optionName(l.milk)) : ""}</small></p>`).join("")}</div>${o.note ? `<div class="notice">${esc(o.note)}</div>` : ""}<div class="row between"><strong>${cash(o.total)}</strong><button class="btn small outline" data-receipt="${o.id}">التفاصيل</button></div>${next ? `<div class="order-actions"><button class="btn red" data-status="${next}" data-order="${o.id}">${labels[o.status]}</button><button class="btn outline" data-status="cancelled" data-order="${o.id}">إلغاء</button></div>` : ""}</article>`;
 }
 function orders() {
   const list = S.orders.filter(
@@ -256,6 +296,7 @@ function settings() {
     };
   return `<form id="settingsForm"><div class="toolbar"><h2>ظبّط التفاصيل مرة، وارتاح.</h2><button class="btn red" type="submit">حفظ الإعدادات</button></div><div class="settings-grid"><section class="panel"><h2>استقبال الطلبات</h2><label class="check"><input type="checkbox" name="acceptingOrders" ${s.acceptingOrders ? "checked" : ""}>استقبال الطلبات الآن</label><label class="field">عدد الطاولات<input class="input" type="number" name="tables" min="1" max="300" value="${s.tables}" required></label>${Object.entries(
     modes,
+    optionName,
   )
     .map(
       ([v, t]) =>
@@ -280,6 +321,7 @@ async function saveMenu(next) {
   );
   S.menu = r.menu;
   S.revision = r.revision;
+  dirty = false;
   toast("تم حفظ المنيو لكل الأجهزة");
   draw();
 }
@@ -333,7 +375,7 @@ function editCategory(isNew) {
 function receipt(id) {
   const o = S.orders.find((o) => o.id === id);
   dialog(
-    `<div id="receipt"><img class="logo" src="assets/logo.png" alt="Luxury Crop"><h2 style="margin-top:20px">طلب #${o.number}</h2><p class="muted">${date(o.createdAt)} · ${states[o.status]}</p><div class="notice">ملخص طلب · الدفع عند الاستلام</div><p>${esc(modes[o.mode])}${o.table ? " · طاولة " + o.table : ""}</p><p>${esc(o.name)} ${esc(o.phone)}</p>${o.address ? `<p>${esc(o.address)}</p>` : ""}${o.lines.map((l) => `<div class="receipt-line"><div>${l.quantity} × ${esc(l.name)}<br><small>${esc(l.categoryName)} ${esc(l.note)} ${esc(l.milk)} ${esc(l.extra)}</small></div><strong>${cash(l.total)}</strong></div>`).join("")}<p>${esc(o.note)}</p><div class="receipt-line"><span>رسوم التوصيل</span><b>${cash(o.fee)}</b></div>${o.discount ? `<div class="receipt-line"><span>خصم الكوبون</span><b>− ${cash(o.discount)}</b></div>` : ""}<div class="receipt-line"><b>الإجمالي</b><b>${cash(o.total)}</b></div></div><button class="btn full red" id="printReceipt" style="margin-top:20px">طباعة ملخص الطلب</button>`,
+    `<div id="receipt"><img class="logo" src="assets/logo.png" alt="Luxury Crop"><h2 style="margin-top:20px">طلب #${o.number}</h2><p class="muted">${date(o.createdAt)} · ${states[o.status]}</p><div class="notice">ملخص طلب · الدفع عند الاستلام</div><p>${esc(modes[o.mode])}${o.table ? " · طاولة " + o.table : ""}</p><p>${esc(o.name)} ${esc(o.phone)}</p>${o.address ? `<p>${esc(o.address)}</p>` : ""}${o.lines.map((l) => `<div class="receipt-line"><div>${l.quantity} × ${esc(l.name)}<br><small>${esc(l.categoryName)} ${esc(l.note)} ${esc(optionName(l.milk))} ${esc(optionName(l.extra))}</small></div><strong>${cash(l.total)}</strong></div>`).join("")}<p>${esc(o.note)}</p><div class="receipt-line"><span>رسوم التوصيل</span><b>${cash(o.fee)}</b></div>${o.discount ? `<div class="receipt-line"><span>خصم الكوبون</span><b>− ${cash(o.discount)}</b></div>` : ""}<div class="receipt-line"><b>الإجمالي</b><b>${cash(o.total)}</b></div></div><button class="btn full red" id="printReceipt" style="margin-top:20px">طباعة ملخص الطلب</button>`,
   );
 }
 const csv = (rows) =>
@@ -368,16 +410,40 @@ $("#loginForm").addEventListener("submit", async (e) => {
   }
 });
 $("#logout").addEventListener("click", async () => {
-  await post("api/logout", {});
-  S = null;
-  $("#dashboard").hidden = true;
-  $("#loginScreen").hidden = false;
+  if (!discardChanges()) return;
+  try {
+    await post("api/logout", {});
+    sessionEpoch++;
+    dirty = false;
+    closeDialog();
+    S = null;
+    $("#dashboard").hidden = true;
+    $("#loginScreen").hidden = false;
+  } catch {
+    toast("تعذر تسجيل الخروج. تحقق من الاتصال وحاول مجددًا.");
+  }
 });
 $("#sidebarToggle").addEventListener("click", () =>
   $("#sidebar").classList.toggle("open"),
 );
-$("#refresh").addEventListener("click", () => refresh());
-$("#period").addEventListener("change", () => refresh());
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $("#sidebar").classList.remove("open");
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#sidebar, #sidebarToggle"))
+    $("#sidebar").classList.remove("open");
+});
+const manualRefresh = () => {
+  if (discardChanges()) {
+    dirty = false;
+    closeDialog();
+    refresh();
+  }
+};
+$("#refresh").addEventListener("click", manualRefresh);
+$("#period").addEventListener("change", () => {
+  if (["home", "orders"].includes(page)) refresh();
+});
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -388,6 +454,8 @@ document.addEventListener("click", async (e) => {
       return;
     }
     if (d.cat) {
+      if (!discardChanges()) return;
+      dirty = false;
       cat = d.cat;
       query = "";
       draw();
@@ -415,12 +483,20 @@ document.addEventListener("click", async (e) => {
         !confirm("إلغاء هذا الطلب؟ لن يحتسب في المبيعات.")
       )
         return;
-      b.disabled = true;
-      await post(`api/admin/order/${d.order}`, { status: d.status }, "PATCH");
-      await refresh();
+      const buttons = b.closest(".order-card").querySelectorAll("button");
+      buttons.forEach((el) => (el.disabled = true));
+      busy = true;
+      try {
+        await post(`api/admin/order/${d.order}`, { status: d.status }, "PATCH");
+        await refresh();
+      } finally {
+        buttons.forEach((el) => (el.disabled = false));
+        busy = false;
+      }
       return;
     }
     if (d.toggle) {
+      b.disabled = true;
       const next = structuredClone(S.menu);
       for (const c of next.categories) {
         const i = c.items.find((i) => i.id === d.toggle);
@@ -541,8 +617,9 @@ document.addEventListener("click", async (e) => {
         const url = new URL($("#qrUrl").value);
         if (!["http:", "https:"].includes(url.protocol))
           throw Error("رابط غير صحيح");
-        const table = Number($("#qrTable").value);
-        if (table) {
+        const tableValue = $("#qrTable").value;
+        const table = tableValue === "" ? null : Number(tableValue);
+        if (table !== null) {
           if (
             !Number.isInteger(table) ||
             table < 1 ||
@@ -550,7 +627,7 @@ document.addEventListener("click", async (e) => {
           )
             throw Error("رقم الطاولة غير صحيح");
           url.searchParams.set("table", table);
-        }
+        } else url.searchParams.delete("table");
         const qr = await fetch(
           "api/admin/qr?url=" + encodeURIComponent(url.href),
         );
@@ -566,7 +643,7 @@ document.addEventListener("click", async (e) => {
       }
     }
   } catch (err) {
-    toast(err.message || "تعذر تنفيذ العملية");
+    toast(saveError(err));
     b.disabled = false;
   }
 });
@@ -671,17 +748,23 @@ document.addEventListener("submit", async (e) => {
       );
       S.settings = r.settings;
       S.revision = r.revision;
+      dirty = false;
       toast("تم حفظ الإعدادات");
       draw();
     }
   } catch (err) {
-    toast(err.message || "تعذر الحفظ");
+    toast(saveError(err));
   } finally {
     busy = false;
     b.disabled = false;
   }
 });
 document.addEventListener("input", (e) => {
+  if (
+    e.target.closest("#settingsForm, #itemForm, #categoryForm") &&
+    !["qrUrl", "qrTable"].includes(e.target.id)
+  )
+    dirty = true;
   if (["orderSearch", "menuSearch"].includes(e.target.id)) {
     query = e.target.value;
     const id = e.target.id,
@@ -717,9 +800,35 @@ setInterval(() => {
     !document.hidden &&
     !$("#dialog").open &&
     !busy &&
+    !refreshing &&
     ["home", "orders"].includes(page) &&
     !query
   )
     refresh();
 }, 10000);
 refresh();
+
+window.addEventListener("beforeunload", (e) => {
+  if (dirty) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+const confirmEditorClose = () =>
+  !$("#dialog").querySelector("#itemForm, #categoryForm") || discardChanges();
+document.addEventListener(
+  "click",
+  (e) => {
+    if (e.target.closest("[data-close]") && !confirmEditorClose()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  },
+  true,
+);
+$("#dialog").addEventListener("cancel", (e) => {
+  if (!confirmEditorClose()) e.preventDefault();
+});
+$("#dialog").addEventListener("close", () => {
+  if ($("#dialog").querySelector("#itemForm, #categoryForm")) dirty = false;
+});

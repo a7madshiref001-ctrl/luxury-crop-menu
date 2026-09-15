@@ -79,14 +79,15 @@ function session(req) {
 async function body(req) {
   if (!req.headers["content-type"]?.startsWith("application/json"))
     D.fail("JSON required", 415);
-  let raw = "";
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    raw += chunk;
-    if (Buffer.byteLength(raw) > 2 * 1024 * 1024)
-      D.fail("حجم الملف أكبر من المسموح", 413);
+    chunks.push(chunk);
+    size += chunk.length;
+    if (size > 2 * 1024 * 1024) D.fail("حجم الملف أكبر من المسموح", 413);
   }
   try {
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       D.fail("JSON غير صالح");
     return parsed;
